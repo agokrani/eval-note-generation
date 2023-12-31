@@ -18,11 +18,17 @@
 # First we import the components we need from `modal`.
 import os
 import json
+import copy
 import re
 from string import Template
-from datasets import load_dataset
-from modal import Image, Stub, gpu, method, web_endpoint, Secret
+from pathlib import Path
+from datasets import load_dataset, Dataset
+from modal import Image, Stub, gpu, method, web_endpoint, Secret, Volume
+from transformers import TrainingArguments
+from peft import LoraConfig
+from trl import DPOTrainer
 
+VOL_MOUNT_PATH = Path("/vol")
 
 # Spec for an image where prometheus-7b is cached locally
 def download_prometheus_7b():
@@ -30,7 +36,6 @@ def download_prometheus_7b():
 
     model_name = "kaist-ai/Prometheus-7b-v1.0"
     snapshot_download(model_name)
-
 
 image = (
     Image.micromamba()
@@ -54,6 +59,8 @@ image = (
         "huggingface_hub==0.14.1",
         "einops==0.6.1",
         "datasets",
+        "trl",
+        "peft"
     )
     # Use huggingface's hi-perf hf-transfer library to download this large model.
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
@@ -61,7 +68,7 @@ image = (
 )
 
 stub = Stub(image=image, name="gen_prometheus_with_conversation")
-
+output_vol = Volume.persisted("finetune-volume")
 
 # ## The model class
 #
@@ -77,8 +84,10 @@ stub = Stub(image=image, name="gen_prometheus_with_conversation")
 # The rest is just using the [pipeline()](https://huggingface.co/docs/transformers/en/main_classes/pipelines)
 # abstraction from the `transformers` library. Refer to the documentation for more parameters and tuning.
 @stub.cls(
-    gpu=gpu.A100(),
-    secret=Secret.from_name("huggingface-secret")
+    gpu=gpu.A100(memory=80, count=1),
+    secret=Secret.from_name("huggingface-secret"), 
+    volumes={VOL_MOUNT_PATH: output_vol},
+    timeout=3600
 )  # Use A10s)
 class Prometheus7B_8bit:
     def __enter__(self):
@@ -86,16 +95,19 @@ class Prometheus7B_8bit:
         from transformers import (
             LlamaForCausalLM,
             AutoTokenizer,
+            TrainingArguments
         )
 
-        model_name = "kaist-ai/Prometheus-7b-v1.0"
+        self.model_name = "kaist-ai/Prometheus-7b-v1.0"
 
-        model = LlamaForCausalLM.from_pretrained(model_name, local_files_only=True, device_map="auto", load_in_4bit=True)
+        model = LlamaForCausalLM.from_pretrained(self.model_name, local_files_only=True, device_map="auto", load_in_4bit=True)
+        model_ref = LlamaForCausalLM.from_pretrained(self.model_name, local_files_only=True, device_map="auto", load_in_4bit=True)
         model.eval()
 
         tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-chat-hf", use_auth_token=os.environ["HUGGINGFACE_TOKEN"], device_map="auto")
         tokenizer.pad_token = tokenizer.eos_token
         self.model = model
+        self.model_ref = model_ref
         self.tokenizer = tokenizer
 
     @method()
@@ -122,7 +134,78 @@ class Prometheus7B_8bit:
         else:
             # Return an empty string if the marker is not found
             return ""
+    
+    
+    # @method()
+    # def train_sft(self, dataset):
+    #     train_dataset = Dataset.from_list(dataset)
+        
+    #     self.model.train()
+    #     peft_config = LoraConfig(r=16, lora_alpha=32, target_modules=["q_proj", "v_proj"], bias="none", task_type="CAUSAL_LM", lora_dropout=0.05, inference_mode=False)
 
+
+    #     training_args = TrainingArguments(
+    #         output_dir= str(VOL_MOUNT_PATH / "model_SFT_0"),
+    #         num_train_epochs= 1,
+    #         per_device_train_batch_size= 1,
+    #         optim = "paged_adamw_8bit",
+    #         logging_steps= 10,
+    #         fp16=True,
+    #         evaluation_strategy="no",
+    #         logging_first_step=True,
+    #         learning_rate= 2e-4,
+    #         weight_decay= 0.001,
+    #         max_grad_norm= 0.3,
+    #         warmup_ratio= 0.03,
+    #         lr_scheduler_type= "linear",
+    #     )
+
+    #     trainer = SFTTrainer(
+    #         model=self.model,
+    #         train_dataset=train_dataset,
+    #         tokenizer=self.tokenizer,
+    #         max_seq_length=4096,
+    #         peft_config=peft_config,
+    #         dataset_text_field="text",
+    #         args=training_args,
+    #         packing= False,
+    #     ) 
+        
+    #     trainer.train()
+    #     trainer.save_model(str(VOL_MOUNT_PATH / "model_SFT_0"))
+
+    #     trainer.model.save_pretrained(str(VOL_MOUNT_PATH / "model_SFT_0" / "final_checkpoint"))
+    #     output_vol.commit()
+    #     print("✅ done")
+
+    @method()
+    def train_dpo(self, dataset):
+        
+        train_dataset = Dataset.from_list(dataset)
+       
+        self.model.train()
+        
+        training_args = TrainingArguments(
+            per_device_train_batch_size=1,
+            learning_rate=3e-04,
+            max_steps=335,
+            remove_unused_columns=False,
+            evaluation_strategy="no",
+            logging_first_step=True,
+            logging_steps=10,  # match results in blog post
+            output_dir=str(VOL_MOUNT_PATH / "model_3"),
+            run_name="dpo_prometheus",
+        )
+        peft_config = LoraConfig(r=16, lora_alpha=32, target_modules=["q_proj", "v_proj"], bias="none", task_type="CAUSAL_LM", lora_dropout=0.05, inference_mode=False)
+        
+        dpo_trainer = DPOTrainer(self.model, self.model_ref, args=training_args, beta=0.1, train_dataset=train_dataset, tokenizer=self.tokenizer, peft_config=peft_config)
+        dpo_trainer.train()
+        dpo_trainer.save_model(str(VOL_MOUNT_PATH / "model_3"))
+
+        dpo_trainer.model.save_pretrained(str(VOL_MOUNT_PATH / "model_3" / "final_checkpoint"))
+        output_vol.commit()
+        print("✅ done")
+    
     @method()
     def generate(self, prompt: str):
        
@@ -177,16 +260,18 @@ Score 5: The summary flawlessly encapsulates the conversation, demonstrating com
 ###Feedback:
 """
 )
+
 TEMP_PATH = "/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/outputs/temp/prompt-1"
+
 
 @stub.local_entrypoint()
 def main():
-    dataset = load_dataset("json", data_files="/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/outputs/train.gpt-4-1106-preview.pred.fullnote.json")
+    dataset = load_dataset("json", data_files="/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/outputs/train.dpo.gpt-4.claude-2.1.max-rand.json")
     dataset = dataset["train"]
     
     model = Prometheus7B_8bit()
-    
-    for i in range(23, len(dataset)):
+    prompts = []
+    for i in range(len(dataset)):
         example = dataset[i]
         print("Processing file: ", example["file"])
     
@@ -196,15 +281,10 @@ def main():
         reference = example["tgt"]
         
         prompt = PROMPT.substitute(conversation=conversation, summary=summary, reference=reference)
-        
-        output = model.generate.remote(prompt)
-        print(f"local: {output}")
-        temp_file = os.path.join(TEMP_PATH, f"{example['file']}.json")
-        with open(temp_file, "r") as file: 
-            data = json.load(file)
-        if isinstance(data, list):
-            # Append the new item to the list
-            data.append(output)
-        with open(temp_file, "w") as file:
-            json.dump(data, file, indent=4)
-
+        prompts.append(prompt)
+    
+    dataset = dataset.add_column("prompt", prompts)
+    train_dataset = dataset.select_columns(['prompt', 'chosen', 'rejected'])
+    
+    #train_dataset = train_dataset.map(lambda example: {'text': example['prompt'] + example['chosen']})
+    model.train_dpo.remote(dataset=train_dataset.to_list())

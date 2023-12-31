@@ -26,8 +26,8 @@ def load_json(file_path):
 if __name__ == "__main__":
     # Load dataset
     extraction_functions = [convert_pydantic_to_openai_function(Note)]
-    dataset = load_json(file_path= "/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/aci-bench/data/challenge_data_json/train.json")
-    temp_path = "/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/temp"
+    dataset = load_json(file_path= "/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/aci-bench/data/challenge_data_json/valid.json")
+    temp_path = "/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/temp/valid"
     
     model = ChatOpenAI(model = "gpt-4-1106-preview", temperature = 0.0, verbose = True)
     
@@ -64,4 +64,4 @@ if __name__ == "__main__":
         
         
     dataset = dataset.add_column("pred", notes)
-    dataset.to_json("/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/outputs/train.gpt-4-1106-preview.pred.fullnote.json")
+    dataset.to_json("/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/outputs/valid.gpt-4-1106-preview.pred.fullnote.json")
