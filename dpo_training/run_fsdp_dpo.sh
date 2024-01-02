@@ -1,0 +1,45 @@
+accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
+--seed 100 \
+--model_name "kaist-ai/Prometheus-7b-v1.0" \
+--cache_volume "/finetune" \
+--cache_dir "prometheus-7b_SFT_0" \
+--dataset_name "/mnt/c/Users/amangokrani/OneDrive - Microsoft/Personal/evaluations/outputs/train.dpo.gpt-4.claude-2.1.max-rand.json" \
+--preprocess_data True \
+--training_type "dpo" \
+--add_special_tokens False \
+--append_concat_token False \
+--splits "train" \
+--train_on_completions False \
+--response_template "###Feedback:" \
+--max_seq_len 4096 \
+--num_train_epochs 2 \
+--logging_steps 5 \
+--log_level "info" \
+--logging_strategy "steps" \
+--evaluation_strategy "no" \
+--save_strategy "epoch" \
+--push_to_hub False \
+--hub_private_repo False \
+--hub_strategy "every_save" \
+--bf16 False \
+--packing False \
+--learning_rate 3e-4 \
+--lr_scheduler_type "cosine" \
+--weight_decay 0.0 \
+--warmup_ratio 0.1 \
+--max_grad_norm 0.3 \
+--warmup_steps 0 \
+--output_dir "prometheus-7b_SFT_DPO_0" \
+--per_device_train_batch_size 1 \
+--per_device_eval_batch_size 1 \
+--gradient_checkpointing True \
+--use_reentrant False \
+--dataset_text_field "text" \
+--use_flash_attn False \
+--use_peft_lora True \
+--use_4bit_qunatization \
+--use_nested_quant \
+--bnb_4bit_compute_dtype "float16" \
+--max_length 4096 \
+--max_prompt_length 3072 \
+--max_target_length 1024 
