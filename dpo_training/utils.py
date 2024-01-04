@@ -142,16 +142,18 @@ def create_and_prepare_model(model_args, finetuning_args):
     cache_dir = str(Path(model_args.cache_volume) / model_args.cache_dir)
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path if not os.path.exists(cache_dir) else cache_dir,
+        model_args.model_name_or_path,
         quantization_config=bnb_config,
-        device_map=device_map
+        device_map=device_map,
+        cache_dir=cache_dir,
     )
     model_ref = None
     if finetuning_args.training_type == "dpo": 
         model_ref = AutoModelForCausalLM.from_pretrained(
-            model_args.model_name_or_path if not os.path.exists(cache_dir) else cache_dir,
+            model_args.model_name_or_path, 
             quantization_config=bnb_config,
-            device_map=device_map
+            device_map=device_map,
+            cache_dir=cache_dir,
         )
     # model = AutoModelForCausalLM.from_pretrained(
     #     args.model_name_or_path if not os.path.exists(cache_dir) else cache_dir,
@@ -161,8 +163,8 @@ def create_and_prepare_model(model_args, finetuning_args):
     #     trust_remote_code=True,
     #     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
     # )
-    if not os.path.exists(cache_dir): 
-        model.save_pretrained(cache_dir)
+    #if not os.path.exists(cache_dir): 
+    #    model.save_pretrained(cache_dir)
     
 
     peft_config = None

@@ -1,9 +1,9 @@
 accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --seed 100 \
 --model_name "kaist-ai/Prometheus-7b-v1.0" \
---cache_volume "/workspace/models" \
+--cache_volume "/workspace/models/" \
 --cache_dir "Prometheus-7b-v1.0" \
---dataset_name "/workspace/eval-note-generation/outputs/train.dpo.gpt-4.claude-2.1.max-rand.json" \
+--dataset_name "/workspace/git/eval-note-generation/outputs/train.dpo.gpt-4.claude-2.1.max-rand.json" \
 --preprocess_data True \
 --add_special_tokens False \
 --append_concat_token False \
@@ -20,7 +20,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --push_to_hub False \
 --hub_private_repo False \
 --hub_strategy "every_save" \
---bf16 True \
+--bf16 False \
 --packing False \
 --learning_rate 3e-5 \
 --lr_scheduler_type "cosine" \
@@ -39,4 +39,4 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --use_peft_lora True \
 --use_4bit_qunatization \
 --use_nested_quant \
---bnb_4bit_compute_dtype "bfloat16"
+--bnb_4bit_compute_dtype "float16"
